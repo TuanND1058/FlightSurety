@@ -5,6 +5,14 @@ contract('Flight Surety Tests', async (accounts) => {
 
     var config;
     let funds = web3.utils.toWei('10', 'ether');
+    let timestamp = Math.floor(Date.now() / 1000);
+
+    const STATUS_CODE_UNKNOWN = 0;
+    const STATUS_CODE_ON_TIME = 10;
+    const STATUS_CODE_LATE_AIRLINE = 20;
+    const STATUS_CODE_LATE_WEATHER = 30;
+    const STATUS_CODE_LATE_TECHNICAL = 40;
+    const STATUS_CODE_LATE_OTHER = 50;
 
     before('setup contract', async () => {
         config = await Test.Config(accounts);
@@ -155,13 +163,134 @@ contract('Flight Surety Tests', async (accounts) => {
         assert.equal(result, true, "Fifth airline should be registered after enough votes");
     });
 
-    it('(passenger) ', async () => {
+    it('(flight) Airline cannot register for flights without registration', async () => {
         // ARRANGE
+        var flightKey = await config.flightSuretyData.getFlightKey.call(config.testAddresses[2], "F1", timestamp);
 
         // ACT
+        try {
+            await config.flightSuretyApp.registerFlight(config.testAddresses[2], "F1", timestamp);
+        } catch (e) {
+            //console.log(e);
+        }
+
+        result = await config.flightSuretyApp.isFlight.call(flightKey);
 
         // ASSERT
+        assert.equal(result, false, "flight has not been created yet");
+    });
 
+    it('(flight) Airline can register for flights once registered', async () => {
+        // ARRANGE
+        var flightKey = await config.flightSuretyData.getFlightKey.call(config.firstAirline, "F2", timestamp);
+
+        // ACT
+        try {
+            await config.flightSuretyApp.registerFlight(config.firstAirline, "F2", timestamp);
+        } catch (e) {
+            console.log(e);
+        }
+
+        result = await config.flightSuretyApp.isFlight.call(flightKey);
+
+        // ASSERT
+        assert.equal(result, true, "flight has not been created yet");
+    });
+
+    it('(passenger) Passengers cannot purchase flight insurance for more than 1 ether', async () => {
+        // ARRANGE
+        let passenger = accounts[6];
+        let fundInsurance = web3.utils.toWei('2', 'ether');
+        let checkPay = false;
+        var flightKey = await config.flightSuretyData.getFlightKey.call(config.firstAirline, "F2", timestamp);
+
+        // ACT
+        try {
+            await config.flightSuretyApp.buyInsurance(config.firstAirline, "F2", timestamp, { from: passenger, value: fundInsurance });
+        } catch (e) {
+            checkPay = true;
+        }
+
+        // ASSERT
+        let insurance = await config.flightSuretyData.viewInsurance.call(passenger, flightKey);
+        assert.notEqual(insurance.passenger, passenger, "Passengers cannot purchase flight insurance");
+
+        assert.equal(checkPay, true, "Passengers cannot purchase flight insurance");
+    });
+
+    it('(passenger) Passenger buys Insurance for the flight', async () => {
+        // ARRANGE
+        let passenger = accounts[6];
+        let fundInsurance = web3.utils.toWei('0.5', 'ether');
+        var flightKey = await config.flightSuretyData.getFlightKey.call(config.firstAirline, "F2", timestamp);
+
+        // ACT
+        try {
+            await config.flightSuretyApp.buyInsurance(config.firstAirline, "F2", timestamp, { from: passenger, value: fundInsurance });
+        } catch (e) {
+            console.log(e);
+        }
+
+        // ASSERT
+        let insurance = await config.flightSuretyData.viewInsurance.call(passenger, flightKey);
+        assert.equal(insurance.passenger, passenger, "Passengers cannot purchase flight insurance");
+        assert.equal(insurance.amount.toString(), fundInsurance, "Insurance amount should be 0.5 ether");
+    });
+
+    it('(passenger) Flight is delayed due to airline error, passengers will receive a credit of 1.5 times the amount paid', async () => {
+        // ARRANGE
+        let passenger = accounts[6];
+        var flightKey = await config.flightSuretyData.getFlightKey.call(config.firstAirline, "F2", timestamp);
+
+        let status = await config.flightSuretyApp.flightStatus.call(flightKey);
+        assert.equal(status, STATUS_CODE_UNKNOWN, "flight status");
+
+        // ACT
+        try {
+            await config.flightSuretyApp.processFlightStatus(config.firstAirline, "F2", timestamp, STATUS_CODE_LATE_AIRLINE);
+        } catch (e) {
+            console.log(e);
+        }
+
+        status = await config.flightSuretyApp.flightStatus.call(flightKey);
+        assert.equal(status, STATUS_CODE_LATE_AIRLINE, "flight status");
+
+        // ASSERT
+        let result = await config.flightSuretyData.viewCredits.call(passenger);
+        // 0.5 ether receives x1.5 = 0.75 ether
+        assert.equal(result.toString(), web3.utils.toWei("0.75", "ether"), "Insurance amount should be 1 ether");
+    });
+
+    it('(passenger) Passenger can withdraw any funds owed to them as a result of receiving credit for insurance payout', async () => {
+        // ARRANGE
+        let passenger = accounts[6];
+
+        // Get balance before action
+        let balanceBeforeWei = await web3.eth.getBalance(passenger);
+        let balanceBeforeEth = web3.utils.fromWei(balanceBeforeWei, 'ether');
+        //console.log(`Balance before action: ${balanceBeforeEth} ETH`);
+
+        let result = await config.flightSuretyData.viewCredits.call(passenger);
+        assert.equal(result.toString(), web3.utils.toWei("0.75", "ether"), "Insurance amount should be 1 ether");
+
+        // ACT
+        try {
+            await config.flightSuretyApp.payInsurance({ from: passenger });
+        } catch (e) {
+            console.log(e);
+        }
+
+        // ASSERT
+        result = await config.flightSuretyData.viewCredits.call(passenger);
+        assert.equal(result.toString(), web3.utils.toWei("0", "ether"), "Insurance amount should be 1 ether");
+
+        // Get balance after action
+        let balanceAfterWei = await web3.eth.getBalance(passenger);
+        let balanceAfterEth = web3.utils.fromWei(balanceAfterWei, 'ether');
+        //console.log(`Balance after action: ${balanceAfterEth} ETH`);
+
+        //console.log(`Balance change: ${balanceAfterEth - balanceBeforeEth} ETH`);
+        assert(balanceAfterEth > balanceBeforeEth, "Balance should decrease after funding");
     });
 
 });

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.7.0;
+pragma experimental ABIEncoderV2;
 
 import "../node_modules/openzeppelin-solidity/contracts/math/SafeMath.sol";
 
@@ -31,7 +32,7 @@ contract FlightSuretyData {
 
     mapping(address => Airline) private airlines;
     mapping(address => mapping(address => bool)) private voteAirlines;
-    mapping(address => mapping(string => Insurance)) private insurances;
+    mapping(address => mapping(bytes32 => Insurance)) private insurances;
     mapping(address => uint256) private passengerCredits;
     address[] private passengers;
     mapping(address => bool) private registeredPassengers;
@@ -127,6 +128,14 @@ contract FlightSuretyData {
         return airlines[airline].numVotes;
     }
 
+    function viewInsurance(address passenger, bytes32 flightKey) public view returns (Insurance memory) {
+        return insurances[passenger][flightKey];
+    }
+
+    function viewCredits(address passenger) public view returns (uint256) {
+        return passengerCredits[passenger];
+    }
+
     /**
     * @dev Add an airline to the registration queue
     *      Can only be called from FlightSuretyApp contract
@@ -172,11 +181,11 @@ contract FlightSuretyData {
     * @dev Buy insurance for a flight
     *
     */
-    function buy(address airline, string calldata flight, address passenger, uint256 amount) external payable {
+    function buy(address airline, bytes32 flightKey, address passenger, uint256 amount) external payable {
         require(airlines[airline].isRegistered, "Airline is not registered");
         require(airlines[airline].isFunded, "Airline is not funded");
 
-        insurances[passenger][flight] = Insurance({
+        insurances[passenger][flightKey] = Insurance({
             passenger: passenger,
             amount: amount,
             isCredited: false
@@ -195,16 +204,28 @@ contract FlightSuretyData {
     /**
      *  @dev Credits payouts to insurees
     */
-    function creditInsurees() external pure {
-
+    function creditInsurees(bytes32 flightKey) external requireIsOperational {
+        for (uint i = 0; i < passengers.length; i++) {
+            address passenger = passengers[i];
+            Insurance memory insurance = insurances[passenger][flightKey];
+            if (insurance.amount > 0 && !insurance.isCredited) {
+                uint256 payoutAmount = insurance.amount * 3 / 2; // 1.5X the amount they paid
+                passengerCredits[passenger] += payoutAmount;
+                insurances[passenger][flightKey].isCredited = true;
+            }
+        }
     }
 
     /**
      *  @dev Transfers eligible payout funds to insuree
      *
     */
-    function pay() external pure {
+    function pay(address passenger) external payable requireIsOperational {
+        uint256 amount = passengerCredits[passenger];
+        require(amount > 0, "No credits available");
 
+        passengerCredits[passenger] = 0;
+        payable(passenger).transfer(amount);
     }
 
     /**
@@ -220,7 +241,7 @@ contract FlightSuretyData {
         airlines[msg.sender].isFunded = true;
     }
 
-    function getFlightKey(address airline, string memory flight, uint256 timestamp) pure internal returns(bytes32) {
+    function getFlightKey(address airline, string memory flight, uint256 timestamp) pure public returns(bytes32) {
         return keccak256(abi.encodePacked(airline, flight, timestamp));
     }
 

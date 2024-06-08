@@ -91,6 +91,14 @@ contract FlightSuretyApp {
     /*                                     SMART CONTRACT FUNCTIONS                             */
     /********************************************************************************************/
 
+    function isFlight(bytes32 flightKey) public view returns (bool) {
+        return flights[flightKey].isRegistered;
+    }
+
+    function flightStatus(bytes32 flightKey) public view returns (uint8) {
+        return flights[flightKey].statusCode;
+    }
+
     /**
     * @dev Add an airline to the registration queue
     *
@@ -103,15 +111,23 @@ contract FlightSuretyApp {
     * @dev Register a future flight for insuring.
     *
     */
-    function registerFlight() external pure {
+    function registerFlight(address airline, string calldata flight, uint256 timestamp) external requireIsOperational {
+        require(flightSuretyData.isAirline(airline), "Only Airline can register for flights");
 
+        bytes32 flightKey = getFlightKey(airline, flight, timestamp);
+        flights[flightKey] = Flight({
+            isRegistered: true,
+            statusCode: STATUS_CODE_UNKNOWN,
+            updatedTimestamp: timestamp,
+            airline: airline
+        });
     }
 
     /**
     * @dev Called after oracle has updated flight status
     *
     */
-    function processFlightStatus(address airline, string memory flight, uint256 timestamp, uint8 statusCode) internal pure {
+    function processFlightStatus(address airline, string calldata flight, uint256 timestamp, uint8 statusCode) public requireIsOperational {
         bytes32 flightKey = getFlightKey(airline, flight, timestamp);
         require(flights[flightKey].isRegistered, "Flight is not registered");
 
@@ -119,7 +135,7 @@ contract FlightSuretyApp {
         flights[flightKey].updatedTimestamp = block.timestamp;
 
         if (statusCode == STATUS_CODE_LATE_AIRLINE) {
-            flightSuretyData.creditInsurees(flight);
+            flightSuretyData.creditInsurees(flightKey);
         }
     }
 
@@ -137,13 +153,17 @@ contract FlightSuretyApp {
         emit OracleRequest(index, airline, flight, timestamp);
     }
 
-    function buyInsurance(address airline, string memory flight, uint256 timestamp) public payable requireIsOperational {
+    function buyInsurance(address airline, string calldata flight, uint256 timestamp) public payable requireIsOperational {
         require(msg.value > 0 ether && msg.value <= 1 ether, "Insurance amount must be between 0 and 1 ether");
 
         bytes32 flightKey = getFlightKey(airline, flight, timestamp);
         require(flights[flightKey].isRegistered, "Flight is not registered");
 
-        flightSuretyData.buy(airline, flight, msg.sender, msg.value);
+        flightSuretyData.buy(airline, flightKey, msg.sender, msg.value);
+    }
+
+    function payInsurance() public requireIsOperational {
+        flightSuretyData.pay(msg.sender);
     }
 
 // region ORACLE MANAGEMENT

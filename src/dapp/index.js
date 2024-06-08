@@ -5,29 +5,33 @@ import './flightsurety.css';
 
 
 (async() => {
+    console.log('load 1');
 
     let result = null;
 
     let contract = new Contract('localhost', () => {
+        console.log('load 2');
 
         // Read transaction
         contract.isOperational((error, result) => {
             console.log(error,result);
             display('Operational Status', 'Check if contract is operational', [ { label: 'Operational Status', error: error, value: result} ]);
         });
-    
+
 
         // User-submitted transaction
         DOM.elid('submit-oracle').addEventListener('click', () => {
+            console.log('submit-oracle');
+
             let flight = DOM.elid('flight-number').value;
             // Write transaction
             contract.fetchFlightStatus(flight, (error, result) => {
                 display('Oracles', 'Trigger oracles', [ { label: 'Fetch Flight Status', error: error, value: result.flight + ' ' + result.timestamp} ]);
             });
         })
-    
+
     });
-    
+
 
 })();
 
@@ -46,10 +50,3 @@ function display(title, description, results) {
     displayDiv.append(section);
 
 }
-
-
-
-
-
-
-
